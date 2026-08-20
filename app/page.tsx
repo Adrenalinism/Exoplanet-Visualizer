@@ -201,12 +201,13 @@ function useCatalogue() {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    const assetBase = import.meta.env.BASE_URL;
     Promise.all([
-      fetch("/data/catalogue.json").then((response) => {
+      fetch(`${assetBase}data/catalogue.json`).then((response) => {
         if (!response.ok) throw new Error("Catalogue failed to load");
         return response.json() as Promise<Catalogue>;
       }),
-      fetch("/data/search-index.json").then((response) => {
+      fetch(`${assetBase}data/search-index.json`).then((response) => {
         if (!response.ok) throw new Error("Search index failed to load");
         return response.json() as Promise<SearchIndex>;
       }),
