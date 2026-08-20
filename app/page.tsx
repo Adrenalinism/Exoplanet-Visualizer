@@ -64,6 +64,9 @@ type SearchEntry = {
 };
 
 type SearchIndex = { entries: SearchEntry[] };
+type PanelMode = "details" | "catalogue";
+type CataloguePreset = "all" | "nearby" | "multi" | "habitable";
+type CatalogueSort = "distance" | "planets" | "recent" | "name";
 
 const planetPalette = ["#bd7559", "#d2a27d", "#7e9d93", "#6f9da0", "#9c927b", "#ae8c73", "#718391", "#a98b9d"];
 
@@ -116,6 +119,25 @@ function planetType(planet: Planet) {
   return "Giant planet";
 }
 
+function habitableBounds(system: System) {
+  if (system.star.luminosityLogSolar === null) return null;
+  const luminositySolar = 10 ** system.star.luminosityLogSolar;
+  return {
+    innerAu: Math.sqrt(luminositySolar / 1.1),
+    outerAu: Math.sqrt(luminositySolar / 0.53),
+  };
+}
+
+function habitablePlanetCount(system: System) {
+  const bounds = habitableBounds(system);
+  if (!bounds) return 0;
+  return system.planets.filter((planet) =>
+    planet.semiMajorAxisAu !== null
+    && planet.semiMajorAxisAu >= bounds.innerAu
+    && planet.semiMajorAxisAu <= bounds.outerAu,
+  ).length;
+}
+
 function orbitLayout(system: System) {
   const known = system.planets.map((planet) => planet.semiMajorAxisAu).filter((value): value is number => value !== null && value > 0);
   const min = known.length ? Math.min(...known) : null;
@@ -136,11 +158,9 @@ function orbitLayout(system: System) {
     [sectors[index], sectors[swapIndex]] = [sectors[swapIndex], sectors[index]];
   }
 
-  const luminositySolar = system.star.luminosityLogSolar === null
-    ? null
-    : 10 ** system.star.luminosityLogSolar;
-  const habitableInnerAu = luminositySolar === null ? null : Math.sqrt(luminositySolar / 1.1);
-  const habitableOuterAu = luminositySolar === null ? null : Math.sqrt(luminositySolar / 0.53);
+  const habitable = habitableBounds(system);
+  const habitableInnerAu = habitable?.innerAu ?? null;
+  const habitableOuterAu = habitable?.outerAu ?? null;
   const zoneFitsScale = min !== null
     && max !== null
     && min < max
@@ -204,6 +224,10 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [panelMode, setPanelMode] = useState<PanelMode>("details");
+  const [cataloguePreset, setCataloguePreset] = useState<CataloguePreset>("nearby");
+  const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("distance");
+  const [catalogueLimit, setCatalogueLimit] = useState(30);
 
   useEffect(() => {
     if (catalogue && systemIndex === null) {
@@ -230,12 +254,55 @@ export default function Home() {
       .slice(0, 8);
   }, [query, searchIndex]);
 
+  const catalogueResults = useMemo(() => {
+    if (!catalogue) return [];
+    const results = catalogue.systems.map((candidate, index) => ({
+      system: candidate,
+      index,
+      habitableCount: habitablePlanetCount(candidate),
+      latestDiscovery: Math.max(...candidate.planets.map((planet) => planet.discoveryYear ?? 0)),
+    })).filter((entry) => {
+      if (cataloguePreset === "nearby") return entry.system.distancePc !== null && entry.system.distancePc * 3.26156 <= 100;
+      if (cataloguePreset === "multi") return entry.system.planetCount >= 3;
+      if (cataloguePreset === "habitable") return entry.habitableCount > 0;
+      return true;
+    });
+
+    results.sort((a, b) => {
+      if (catalogueSort === "distance") return (a.system.distancePc ?? Number.POSITIVE_INFINITY) - (b.system.distancePc ?? Number.POSITIVE_INFINITY) || a.system.name.localeCompare(b.system.name);
+      if (catalogueSort === "planets") return b.system.planetCount - a.system.planetCount || a.system.name.localeCompare(b.system.name);
+      if (catalogueSort === "recent") return b.latestDiscovery - a.latestDiscovery || a.system.name.localeCompare(b.system.name);
+      return a.system.name.localeCompare(b.system.name);
+    });
+    return results;
+  }, [catalogue, cataloguePreset, catalogueSort]);
+
   function chooseSearchResult(entry: SearchEntry) {
     setSystemIndex(entry.systemIndex);
     setSelectedPlanetIndex(entry.type === "planet" ? entry.planetIndex : null);
     setZoom(1);
     setQuery("");
     setSearchOpen(false);
+    setPanelMode("details");
+  }
+
+  function choosePreset(preset: CataloguePreset) {
+    setCataloguePreset(preset);
+    setCatalogueLimit(30);
+    if (preset === "nearby" || preset === "habitable") setCatalogueSort("distance");
+    if (preset === "multi") setCatalogueSort("planets");
+  }
+
+  function browseSystem(index: number) {
+    setSystemIndex(index);
+    setSelectedPlanetIndex(null);
+    setZoom(1);
+  }
+
+  function surpriseMe() {
+    if (!catalogue?.systems.length) return;
+    browseSystem(Math.floor(Math.random() * catalogue.systems.length));
+    setPanelMode("details");
   }
 
   const starFacts = system ? [
@@ -299,36 +366,99 @@ export default function Home() {
       <aside className="information-panel">
         {system ? (
           <>
-            <div className="eyebrow"><span /> Selected object</div>
-            <div className="object-heading">
-              <div>
-                <p>{selectedPlanet ? planetType(selectedPlanet) : system.star.spectralType ? `${system.star.spectralType} host star` : "Host star"}</p>
-                <h1>{selectedPlanet?.name ?? system.name}</h1>
+            <div className="panel-tabs" role="tablist" aria-label="Information panel mode">
+              <button type="button" role="tab" aria-selected={panelMode === "details"} className={panelMode === "details" ? "active" : ""} onClick={() => setPanelMode("details")}>Details</button>
+              <button type="button" role="tab" aria-selected={panelMode === "catalogue"} className={panelMode === "catalogue" ? "active" : ""} onClick={() => setPanelMode("catalogue")}>Catalogue</button>
+            </div>
+
+            {panelMode === "details" ? (
+              <div className="details-panel" role="tabpanel">
+                <div className="eyebrow"><span /> Selected object</div>
+                <div className="object-heading">
+                  <div>
+                    <p>{selectedPlanet ? planetType(selectedPlanet) : system.star.spectralType ? `${system.star.spectralType} host star` : "Host star"}</p>
+                    <h1>{selectedPlanet?.name ?? system.name}</h1>
+                  </div>
+                  <div className={`planet-preview ${selectedPlanet ? "" : "star-preview"}`} style={{ "--body-color": selectedColor } as React.CSSProperties} />
+                </div>
+                <p className="summary">
+                  {selectedPlanet
+                    ? `${selectedPlanet.name} is one of ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"} orbiting ${system.name}.${selectedPlanet.discoveryMethod ? ` It was identified using ${selectedPlanet.discoveryMethod.toLowerCase()}.` : ""}`
+                    : `${system.name} hosts ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"}${system.distancePc === null ? "." : `, approximately ${format(system.distancePc * 3.26156)} light-years from Earth.`}`}
+                </p>
+                <div className="fact-list">
+                  {(selectedPlanet ? planetFacts : starFacts).map((fact) => (
+                    <div className="fact" key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong></div>
+                  ))}
+                </div>
+                <div className="scale-note">
+                  <span>i</span>
+                  <p>
+                    <strong>{selectedPlanet?.orbitSource === "derived" ? "Derived orbit" : selectedPlanet?.orbitSource === "display-only" ? "Illustrative orbit" : "Display scale"}</strong>
+                    {selectedPlanet?.orbitSource === "derived"
+                      ? "Orbital radius was calculated from period and stellar mass. The ≈ symbol marks this derived value."
+                      : selectedPlanet?.orbitSource === "display-only"
+                        ? "NASA has insufficient orbital data, so this planet’s placement is illustrative only."
+                        : "Body sizes are exaggerated for visibility. Orbital distances use a logarithmic scale."}
+                  </p>
+                </div>
+                <a className="source-link" href={catalogue?.metadata.sourceUrl ?? "https://exoplanetarchive.ipac.caltech.edu/"} target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
               </div>
-              <div className={`planet-preview ${selectedPlanet ? "" : "star-preview"}`} style={{ "--body-color": selectedColor } as React.CSSProperties} />
-            </div>
-            <p className="summary">
-              {selectedPlanet
-                ? `${selectedPlanet.name} is one of ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"} orbiting ${system.name}.${selectedPlanet.discoveryMethod ? ` It was identified using ${selectedPlanet.discoveryMethod.toLowerCase()}.` : ""}`
-                : `${system.name} hosts ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"}${system.distancePc === null ? "." : `, approximately ${format(system.distancePc * 3.26156)} light-years from Earth.`}`}
-            </p>
-            <div className="fact-list">
-              {(selectedPlanet ? planetFacts : starFacts).map((fact) => (
-                <div className="fact" key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong></div>
-              ))}
-            </div>
-            <div className="scale-note">
-              <span>i</span>
-              <p>
-                <strong>{selectedPlanet?.orbitSource === "derived" ? "Derived orbit" : selectedPlanet?.orbitSource === "display-only" ? "Illustrative orbit" : "Display scale"}</strong>
-                {selectedPlanet?.orbitSource === "derived"
-                  ? "Orbital radius was calculated from period and stellar mass. The ≈ symbol marks this derived value."
-                  : selectedPlanet?.orbitSource === "display-only"
-                    ? "NASA has insufficient orbital data, so this planet’s placement is illustrative only."
-                    : "Body sizes are exaggerated for visibility. Orbital distances use a logarithmic scale."}
-              </p>
-            </div>
-            <a className="source-link" href={catalogue?.metadata.sourceUrl ?? "https://exoplanetarchive.ipac.caltech.edu/"} target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
+            ) : (
+              <div className="catalogue-panel" role="tabpanel">
+                <div className="catalogue-heading">
+                  <div><span>Explore</span><h1>Planetary systems</h1></div>
+                  <button type="button" className="surprise-button" onClick={surpriseMe}>Surprise me</button>
+                </div>
+                <p className="catalogue-intro">Browse the NASA archive without needing to know a name first.</p>
+
+                <div className="preset-list" aria-label="Catalogue collections">
+                  {([
+                    ["nearby", "Nearby", "≤ 100 ly"],
+                    ["multi", "Multi-planet", "3+ worlds"],
+                    ["habitable", "Est. habitable zone", "orbit candidates"],
+                    ["all", "All systems", "complete archive"],
+                  ] as [CataloguePreset, string, string][]).map(([value, label, note]) => (
+                    <button type="button" key={value} className={cataloguePreset === value ? "active" : ""} onClick={() => choosePreset(value)}>
+                      <strong>{label}</strong><small>{note}</small>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="catalogue-toolbar">
+                  <span>{catalogueResults.length.toLocaleString()} systems</span>
+                  <label>Sort
+                    <select value={catalogueSort} onChange={(event) => { setCatalogueSort(event.target.value as CatalogueSort); setCatalogueLimit(30); }}>
+                      <option value="distance">Nearest</option>
+                      <option value="planets">Most planets</option>
+                      <option value="recent">Recently discovered</option>
+                      <option value="name">A–Z</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="system-list">
+                  {catalogueResults.slice(0, catalogueLimit).map((entry) => (
+                    <button
+                      type="button"
+                      key={entry.system.name}
+                      className={systemIndex === entry.index ? "system-card active" : "system-card"}
+                      onClick={() => browseSystem(entry.index)}
+                    >
+                      <span className="system-card-copy">
+                        <strong>{entry.system.name}</strong>
+                        <small>{entry.system.star.spectralType ?? "Unknown stellar type"} · {entry.system.distancePc === null ? "Distance unknown" : `${format(entry.system.distancePc * 3.26156)} ly`}</small>
+                        {entry.habitableCount > 0 && <em>{entry.habitableCount} orbit{entry.habitableCount === 1 ? "" : "s"} in estimated HZ</em>}
+                      </span>
+                      <span className="planet-count"><strong>{entry.system.planetCount}</strong><small>planet{entry.system.planetCount === 1 ? "" : "s"}</small></span>
+                    </button>
+                  ))}
+                </div>
+                {catalogueLimit < catalogueResults.length && (
+                  <button type="button" className="load-more" onClick={() => setCatalogueLimit((value) => value + 30)}>Load 30 more</button>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div className="catalogue-loading"><span className="brand-mark" /><p>{error ? "The catalogue could not be loaded." : "Preparing the exoplanet atlas…"}</p></div>
@@ -361,7 +491,7 @@ export default function Home() {
               <button
                 className={`celestial-body body-star ${selectedPlanetIndex === null ? "is-selected" : ""}`}
                 type="button"
-                onClick={() => setSelectedPlanetIndex(null)}
+                onClick={() => { setSelectedPlanetIndex(null); setPanelMode("details"); }}
                 aria-label={`Select ${system.name}`}
                 style={{ "--body-color": starColor(system.star.temperatureK), "--body-size": "62px" } as React.CSSProperties}
               ><span className="body-label">{system.name}</span></button>
@@ -370,7 +500,7 @@ export default function Home() {
                   className={`celestial-body dynamic-body ${selectedPlanetIndex === index ? "is-selected" : ""}`}
                   type="button"
                   key={planet.name}
-                  onClick={() => setSelectedPlanetIndex(index)}
+                  onClick={() => { setSelectedPlanetIndex(index); setPanelMode("details"); }}
                   aria-label={`Select ${planet.name}`}
                   style={{
                     "--body-color": planetColor(planet.name),
