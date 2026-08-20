@@ -339,13 +339,24 @@ export default function Home() {
   }
 
   function handleWheel(event: React.WheelEvent<HTMLElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const isInsideCanvas = event.clientX >= bounds.left
+      && event.clientX <= bounds.right
+      && event.clientY >= bounds.top
+      && event.clientY <= bounds.bottom;
+    if (!isInsideCanvas) return;
     event.preventDefault();
+    event.stopPropagation();
     const factor = Math.exp(-event.deltaY * 0.0015);
-    zoomAt(factor, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+    zoomAt(factor, event.clientX, event.clientY, bounds);
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    const isPanButton = event.pointerType === "mouse" ? event.button === 1 : event.button === 0;
+    const isTouchingControl = event.pointerType !== "mouse" && (event.target as HTMLElement).closest("button");
+    if (!isPanButton || isTouchingControl) return;
+    event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     setIsDragging(true);
@@ -354,6 +365,10 @@ export default function Home() {
   function handlePointerMove(event: React.PointerEvent<HTMLElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.pointerType === "mouse" && (event.buttons & 4) === 0) {
+      endPointer(event);
+      return;
+    }
     const deltaX = event.clientX - drag.x;
     const deltaY = event.clientY - drag.y;
     dragRef.current = { ...drag, x: event.clientX, y: event.clientY };
@@ -461,7 +476,7 @@ export default function Home() {
                       ? "Orbital radius was calculated from period and stellar mass. The ≈ symbol marks this derived value."
                       : selectedPlanet?.orbitSource === "display-only"
                         ? "NASA has insufficient orbital data, so this planet’s placement is illustrative only."
-                        : `Body sizes are exaggerated for visibility. Orbital distances use a ${scaleMode === "linear" ? "linear" : "logarithmic"} scale. Scroll to zoom and drag to pan.`}
+                        : `Body sizes are exaggerated for visibility. Orbital distances use a ${scaleMode === "linear" ? "linear" : "logarithmic"} scale. Scroll over the planetary view to zoom; hold the middle mouse button and drag to pan.`}
                   </p>
                 </div>
                 <a className="source-link" href={catalogue?.metadata.sourceUrl ?? "https://exoplanetarchive.ipac.caltech.edu/"} target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
@@ -535,6 +550,7 @@ export default function Home() {
         onPointerMove={handlePointerMove}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
+        onAuxClick={(event) => { if (event.button === 1) event.preventDefault(); }}
       >
         {system && layout ? (
           <>
