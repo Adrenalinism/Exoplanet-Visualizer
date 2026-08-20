@@ -24,3 +24,18 @@ paper. The CSV includes reference columns for tracing those values.
 The catalogue changes as discoveries and measurements are added. Re-download
 the source URL above when a fresh snapshot is needed, and update the retrieval
 date, row count, size, and checksum recorded here.
+
+## Web catalogue
+
+Run `npm run data:build` from the project root after replacing the raw CSV.
+The compiler validates the planet count and produces:
+
+- `public/data/catalogue.json`: systems, stellar properties, planets, and
+  visualization parameters.
+- `public/data/search-index.json`: lightweight system and planet lookup data.
+
+The current build contains 4,749 systems and all 6,336 planets. It retains
+measured semi-major axes for 5,908 planets, derives 420 axes from orbital period
+and stellar mass using Kepler's third law, and labels 8 placements as
+display-only because neither route is available. Derived and illustrative
+values remain explicitly identified in the generated data and interface.

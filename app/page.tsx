@@ -1,59 +1,212 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const bodies = [
-  { id: "star", name: "TRAPPIST-1", type: "Ultra-cool red dwarf", orbit: 0, size: 62, color: "#f08a5d" },
-  { id: "b", name: "TRAPPIST-1 b", type: "Terrestrial planet", orbit: 1, size: 13, color: "#bd7559" },
-  { id: "c", name: "TRAPPIST-1 c", type: "Terrestrial planet", orbit: 2, size: 14, color: "#d2a27d" },
-  { id: "d", name: "TRAPPIST-1 d", type: "Terrestrial planet", orbit: 3, size: 10, color: "#7e9d93" },
-  { id: "e", name: "TRAPPIST-1 e", type: "Terrestrial planet", orbit: 4, size: 12, color: "#6f9da0" },
-  { id: "f", name: "TRAPPIST-1 f", type: "Terrestrial planet", orbit: 5, size: 13, color: "#9c927b" },
-  { id: "g", name: "TRAPPIST-1 g", type: "Terrestrial planet", orbit: 6, size: 15, color: "#ae8c73" },
-  { id: "h", name: "TRAPPIST-1 h", type: "Terrestrial planet", orbit: 7, size: 9, color: "#718391" },
-];
+type NullableNumber = number | null;
 
-const facts: Record<string, { label: string; value: string }[]> = {
-  star: [
-    { label: "Distance from Earth", value: "40.66 ly" },
-    { label: "Spectral type", value: "M8 V" },
-    { label: "Mass", value: "0.090 M☉" },
-    { label: "Radius", value: "0.120 R☉" },
-    { label: "Temperature", value: "2,566 K" },
-    { label: "Known planets", value: "7" },
-  ],
-  e: [
-    { label: "Orbital period", value: "6.10 days" },
-    { label: "Orbital radius", value: "0.029 AU" },
-    { label: "Radius", value: "0.920 R⊕" },
-    { label: "Mass", value: "0.692 M⊕" },
-    { label: "Equilibrium temp.", value: "250 K" },
-    { label: "Discovery", value: "2017 · Transit" },
-  ],
+type Planet = {
+  name: string;
+  letter: string | null;
+  periodDays: NullableNumber;
+  semiMajorAxisAu: NullableNumber;
+  orbitSource: "measured" | "derived" | "display-only";
+  eccentricity: NullableNumber;
+  inclinationDeg: NullableNumber;
+  radiusEarth: NullableNumber;
+  massEarth: NullableNumber;
+  massJupiter: NullableNumber;
+  massMethod: string | null;
+  equilibriumTempK: NullableNumber;
+  insolationEarth: NullableNumber;
+  discoveryYear: NullableNumber;
+  discoveryMethod: string | null;
+  discoveryFacility: string | null;
+  discoveryLocale: string | null;
+  isTransiting: boolean;
 };
 
-const fallbackFacts = [
-  { label: "Classification", value: "Terrestrial" },
-  { label: "Detection method", value: "Transit" },
-  { label: "Host star", value: "TRAPPIST-1" },
-  { label: "Data source", value: "NASA Exoplanet Archive" },
-];
+type System = {
+  name: string;
+  aliases: string[];
+  starCount: NullableNumber;
+  planetCount: number;
+  distancePc: NullableNumber;
+  raDeg: NullableNumber;
+  decDeg: NullableNumber;
+  star: {
+    spectralType: string | null;
+    temperatureK: NullableNumber;
+    massSolar: NullableNumber;
+    radiusSolar: NullableNumber;
+    luminosityLogSolar: NullableNumber;
+    ageGyr: NullableNumber;
+    metallicityDex: NullableNumber;
+  };
+  planets: Planet[];
+};
+
+type Catalogue = {
+  metadata: {
+    planetCount: number;
+    systemCount: number;
+    sourceModifiedUtc: string;
+    sourceUrl: string;
+  };
+  systems: System[];
+};
+
+type SearchEntry = {
+  label: string;
+  type: "system" | "planet";
+  systemIndex: number;
+  planetIndex: number | null;
+  detail: string;
+};
+
+type SearchIndex = { entries: SearchEntry[] };
+
+const planetPalette = ["#bd7559", "#d2a27d", "#7e9d93", "#6f9da0", "#9c927b", "#ae8c73", "#718391", "#a98b9d"];
+
+function hash(value: string) {
+  let result = 0;
+  for (let index = 0; index < value.length; index += 1) result = ((result << 5) - result + value.charCodeAt(index)) | 0;
+  return Math.abs(result);
+}
+
+function planetColor(name: string) {
+  return planetPalette[hash(name) % planetPalette.length];
+}
+
+function starColor(temperature: NullableNumber) {
+  if (temperature === null || temperature < 3700) return "#f08a5d";
+  if (temperature < 5200) return "#f1b56b";
+  if (temperature < 6000) return "#f0d99a";
+  if (temperature < 7500) return "#e8edf3";
+  return "#a9c9f8";
+}
+
+function format(value: NullableNumber, digits = 2) {
+  if (value === null) return "Unknown";
+  return value.toLocaleString(undefined, { maximumFractionDigits: digits });
+}
+
+function planetType(planet: Planet) {
+  if (planet.radiusEarth === null) return "Confirmed exoplanet";
+  if (planet.radiusEarth <= 1.6) return "Rocky-size planet";
+  if (planet.radiusEarth <= 4) return "Sub-Neptune-size planet";
+  return "Giant planet";
+}
+
+function orbitLayout(system: System) {
+  const known = system.planets.map((planet) => planet.semiMajorAxisAu).filter((value): value is number => value !== null && value > 0);
+  const min = known.length ? Math.min(...known) : null;
+  const max = known.length ? Math.max(...known) : null;
+
+  const mapAxis = (axis: NullableNumber, index: number) => {
+    if (axis !== null && axis > 0 && min !== null && max !== null) {
+      if (min === max) return 55;
+      return 22 + ((Math.log(axis) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 72;
+    }
+    return system.planets.length === 1 ? 55 : 22 + (index / Math.max(1, system.planets.length - 1)) * 72;
+  };
+
+  return {
+    planets: system.planets.map((planet, index) => {
+      const orbitSize = mapAxis(planet.semiMajorAxisAu, index);
+      const angle = ((hash(planet.name) % 360) * Math.PI) / 180;
+      return {
+        ...planet,
+        orbitSize,
+        left: 50 + Math.cos(angle) * orbitSize / 2,
+        top: 50 + Math.sin(angle) * orbitSize / 2,
+      };
+    }),
+    mapAxis,
+  };
+}
+
+function useCatalogue() {
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
+  const [searchIndex, setSearchIndex] = useState<SearchIndex | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/data/catalogue.json").then((response) => {
+        if (!response.ok) throw new Error("Catalogue failed to load");
+        return response.json() as Promise<Catalogue>;
+      }),
+      fetch("/data/search-index.json").then((response) => {
+        if (!response.ok) throw new Error("Search index failed to load");
+        return response.json() as Promise<SearchIndex>;
+      }),
+    ]).then(([nextCatalogue, nextSearch]) => {
+      setCatalogue(nextCatalogue);
+      setSearchIndex(nextSearch);
+    }).catch(() => setError(true));
+  }, []);
+
+  return { catalogue, searchIndex, error };
+}
 
 export default function Home() {
-  const [selectedId, setSelectedId] = useState("e");
+  const { catalogue, searchIndex, error } = useCatalogue();
+  const [systemIndex, setSystemIndex] = useState<number | null>(null);
+  const [selectedPlanetIndex, setSelectedPlanetIndex] = useState<number | null>(3);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const selected = bodies.find((body) => body.id === selectedId) ?? bodies[0];
-  const searchResults = bodies.filter((body) =>
-    body.name.toLowerCase().includes(query.toLowerCase()),
-  );
 
-  function chooseBody(id: string) {
-    setSelectedId(id);
+  useEffect(() => {
+    if (catalogue && systemIndex === null) {
+      const initial = catalogue.systems.findIndex((system) => system.name === "TRAPPIST-1");
+      setSystemIndex(initial >= 0 ? initial : 0);
+    }
+  }, [catalogue, systemIndex]);
+
+  const system = catalogue && systemIndex !== null ? catalogue.systems[systemIndex] : null;
+  const layout = useMemo(() => system ? orbitLayout(system) : null, [system]);
+  const selectedPlanet = system && selectedPlanetIndex !== null ? system.planets[selectedPlanetIndex] ?? null : null;
+  const selectedColor = selectedPlanet ? planetColor(selectedPlanet.name) : starColor(system?.star.temperatureK ?? null);
+
+  const searchResults = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term || !searchIndex) return [];
+    return searchIndex.entries
+      .filter((entry) => entry.label.toLowerCase().includes(term))
+      .sort((a, b) => {
+        const aStarts = a.label.toLowerCase().startsWith(term) ? 0 : 1;
+        const bStarts = b.label.toLowerCase().startsWith(term) ? 0 : 1;
+        return aStarts - bStarts || a.label.length - b.label.length;
+      })
+      .slice(0, 8);
+  }, [query, searchIndex]);
+
+  function chooseSearchResult(entry: SearchEntry) {
+    setSystemIndex(entry.systemIndex);
+    setSelectedPlanetIndex(entry.type === "planet" ? entry.planetIndex : null);
+    setZoom(1);
     setQuery("");
     setSearchOpen(false);
   }
+
+  const starFacts = system ? [
+    { label: "Distance from Earth", value: system.distancePc === null ? "Unknown" : `${format(system.distancePc * 3.26156)} ly` },
+    { label: "Spectral type", value: system.star.spectralType ?? "Unknown" },
+    { label: "Mass", value: system.star.massSolar === null ? "Unknown" : `${format(system.star.massSolar, 4)} M☉` },
+    { label: "Radius", value: system.star.radiusSolar === null ? "Unknown" : `${format(system.star.radiusSolar, 4)} R☉` },
+    { label: "Temperature", value: system.star.temperatureK === null ? "Unknown" : `${format(system.star.temperatureK, 0)} K` },
+    { label: "Known planets", value: String(system.planetCount) },
+  ] : [];
+
+  const planetFacts = selectedPlanet ? [
+    { label: "Orbital period", value: selectedPlanet.periodDays === null ? "Unknown" : `${format(selectedPlanet.periodDays, 4)} days` },
+    { label: "Orbital radius", value: selectedPlanet.semiMajorAxisAu === null ? "Unknown" : `${selectedPlanet.orbitSource === "derived" ? "≈ " : ""}${format(selectedPlanet.semiMajorAxisAu, 5)} AU` },
+    { label: "Radius", value: selectedPlanet.radiusEarth === null ? "Unknown" : `${format(selectedPlanet.radiusEarth, 3)} R⊕` },
+    { label: "Mass", value: selectedPlanet.massEarth === null ? "Unknown" : `${format(selectedPlanet.massEarth, 3)} M⊕` },
+    { label: "Equilibrium temp.", value: selectedPlanet.equilibriumTempK === null ? "Unknown" : `${format(selectedPlanet.equilibriumTempK, 0)} K` },
+    { label: "Discovery", value: [selectedPlanet.discoveryYear, selectedPlanet.discoveryMethod].filter(Boolean).join(" · ") || "Unknown" },
+  ] : [];
 
   return (
     <main className="app-shell">
@@ -68,98 +221,121 @@ export default function Home() {
             <span aria-hidden="true">⌕</span>
             <input
               aria-label="Search planetary systems"
-              placeholder="Search systems, stars or planets…"
+              placeholder={catalogue ? "Search 4,749 systems and 6,336 planets…" : "Loading NASA catalogue…"}
               value={query}
+              disabled={!catalogue}
               onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
               onFocus={() => setSearchOpen(true)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setSearchOpen(false);
-                if (event.key === "Enter" && searchResults[0]) chooseBody(searchResults[0].id);
+                if (event.key === "Enter" && searchResults[0]) chooseSearchResult(searchResults[0]);
               }}
             />
             <kbd>↵</kbd>
           </label>
           {searchOpen && query && (
             <div className="search-results">
-              {searchResults.length ? searchResults.map((body) => (
-                <button type="button" key={body.id} onClick={() => chooseBody(body.id)}>
-                  <i style={{ background: body.color }} />
-                  <span><strong>{body.name}</strong><small>{body.type}</small></span>
-                  <em>{body.id === "star" ? "STAR" : "PLANET"}</em>
+              {searchResults.length ? searchResults.map((entry) => (
+                <button type="button" key={`${entry.type}-${entry.systemIndex}-${entry.planetIndex}`} onClick={() => chooseSearchResult(entry)}>
+                  <i className={entry.type} />
+                  <span><strong>{entry.label}</strong><small>{entry.detail}</small></span>
+                  <em>{entry.type}</em>
                 </button>
-              )) : <p>No matching objects in this system</p>}
+              )) : <p>No catalogue matches</p>}
             </div>
           )}
         </div>
-        <button className="data-status" type="button">
-          <span /> 6,336 confirmed planets
-        </button>
+        <div className="data-status">
+          <span /> {catalogue ? `${catalogue.metadata.planetCount.toLocaleString()} confirmed planets` : "Loading catalogue"}
+        </div>
       </header>
 
       <aside className="information-panel">
-        <div className="eyebrow"><span /> Selected object</div>
-        <div className="object-heading">
-          <div>
-            <p>{selected.type}</p>
-            <h1>{selected.name}</h1>
-          </div>
-          <div className="planet-preview" style={{ "--body-color": selected.color } as React.CSSProperties} />
-        </div>
-        <p className="summary">
-          {selected.id === "star"
-            ? "An ultra-cool dwarf hosting seven known rocky worlds in a remarkably compact planetary system."
-            : "A compact rocky world orbiting one of the most studied planetary systems beyond our own."}
-        </p>
-        <div className="fact-list">
-          {(facts[selected.id] ?? fallbackFacts).map((fact) => (
-            <div className="fact" key={fact.label}>
-              <span>{fact.label}</span>
-              <strong>{fact.value}</strong>
+        {system ? (
+          <>
+            <div className="eyebrow"><span /> Selected object</div>
+            <div className="object-heading">
+              <div>
+                <p>{selectedPlanet ? planetType(selectedPlanet) : system.star.spectralType ? `${system.star.spectralType} host star` : "Host star"}</p>
+                <h1>{selectedPlanet?.name ?? system.name}</h1>
+              </div>
+              <div className={`planet-preview ${selectedPlanet ? "" : "star-preview"}`} style={{ "--body-color": selectedColor } as React.CSSProperties} />
             </div>
-          ))}
-        </div>
-        <div className="scale-note">
-          <span>i</span>
-          <p><strong>Display scale</strong>Body sizes are exaggerated for visibility. Orbital distances use a compressed scale.</p>
-        </div>
-        <a className="source-link" href="https://exoplanetarchive.ipac.caltech.edu/" target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
+            <p className="summary">
+              {selectedPlanet
+                ? `${selectedPlanet.name} is one of ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"} orbiting ${system.name}.${selectedPlanet.discoveryMethod ? ` It was identified using ${selectedPlanet.discoveryMethod.toLowerCase()}.` : ""}`
+                : `${system.name} hosts ${system.planetCount} confirmed planet${system.planetCount === 1 ? "" : "s"}${system.distancePc === null ? "." : `, approximately ${format(system.distancePc * 3.26156)} light-years from Earth.`}`}
+            </p>
+            <div className="fact-list">
+              {(selectedPlanet ? planetFacts : starFacts).map((fact) => (
+                <div className="fact" key={fact.label}><span>{fact.label}</span><strong>{fact.value}</strong></div>
+              ))}
+            </div>
+            <div className="scale-note">
+              <span>i</span>
+              <p>
+                <strong>{selectedPlanet?.orbitSource === "derived" ? "Derived orbit" : selectedPlanet?.orbitSource === "display-only" ? "Illustrative orbit" : "Display scale"}</strong>
+                {selectedPlanet?.orbitSource === "derived"
+                  ? "Orbital radius was calculated from period and stellar mass. The ≈ symbol marks this derived value."
+                  : selectedPlanet?.orbitSource === "display-only"
+                    ? "NASA has insufficient orbital data, so this planet’s placement is illustrative only."
+                    : "Body sizes are exaggerated for visibility. Orbital distances use a logarithmic scale."}
+              </p>
+            </div>
+            <a className="source-link" href={catalogue?.metadata.sourceUrl ?? "https://exoplanetarchive.ipac.caltech.edu/"} target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
+          </>
+        ) : (
+          <div className="catalogue-loading"><span className="brand-mark" /><p>{error ? "The catalogue could not be loaded." : "Preparing the exoplanet atlas…"}</p></div>
+        )}
       </aside>
 
-      <section className="system-view" aria-label="TRAPPIST-1 planetary system visualization">
-        <div className="system-meta">
-          <span>Planetary system</span>
-          <h2>TRAPPIST-1</h2>
-          <p>40.66 light-years away · Aquarius</p>
-        </div>
-        <div className="view-badge"><span /> LIVE MODEL</div>
-
-        <div className="orbit-stage" style={{ "--view-zoom": zoom } as React.CSSProperties}>
-          <div className="habitable-zone" />
-          {bodies.slice(1).map((body) => (
-            <div className={`orbit orbit-${body.orbit}`} key={`orbit-${body.id}`} />
-          ))}
-          {bodies.map((body) => (
-            <button
-              className={`celestial-body body-${body.id} ${selectedId === body.id ? "is-selected" : ""}`}
-              key={body.id}
-              onClick={() => chooseBody(body.id)}
-              aria-label={`Select ${body.name}`}
-              style={{ "--body-color": body.color, "--body-size": `${body.size}px` } as React.CSSProperties}
-            >
-              <span className="body-label">{body.id === "star" ? body.name : body.id.toUpperCase()}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="legend">
-          <span><i className="legend-line habitable" /> Habitable zone</span>
-          <span><i className="legend-line orbit-line" /> Planet orbit</span>
-        </div>
-        <div className="view-controls">
-          <button type="button" aria-label="Reset view" onClick={() => setZoom(1)}>↺</button>
-          <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.35, value + .1))}>＋</button>
-          <button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(.7, value - .1))}>−</button>
-        </div>
+      <section className="system-view" aria-label={system ? `${system.name} planetary system visualization` : "Planetary system visualization"}>
+        {system && layout ? (
+          <>
+            <div className="system-meta">
+              <span>Planetary system</span>
+              <h2>{system.name}</h2>
+              <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
+            </div>
+            <div className="view-badge"><span /> NASA SNAPSHOT</div>
+            <div className="orbit-stage" style={{ "--view-zoom": zoom } as React.CSSProperties}>
+              {layout.planets.map((planet) => (
+                <div className="orbit dynamic-orbit" key={`orbit-${planet.name}`} style={{ "--orbit-size": `${planet.orbitSize}%` } as React.CSSProperties} />
+              ))}
+              <button
+                className={`celestial-body body-star ${selectedPlanetIndex === null ? "is-selected" : ""}`}
+                type="button"
+                onClick={() => setSelectedPlanetIndex(null)}
+                aria-label={`Select ${system.name}`}
+                style={{ "--body-color": starColor(system.star.temperatureK), "--body-size": "62px" } as React.CSSProperties}
+              ><span className="body-label">{system.name}</span></button>
+              {layout.planets.map((planet, index) => (
+                <button
+                  className={`celestial-body dynamic-body ${selectedPlanetIndex === index ? "is-selected" : ""}`}
+                  type="button"
+                  key={planet.name}
+                  onClick={() => setSelectedPlanetIndex(index)}
+                  aria-label={`Select ${planet.name}`}
+                  style={{
+                    "--body-color": planetColor(planet.name),
+                    "--body-size": `${Math.max(9, Math.min(20, 8 + (planet.radiusEarth ?? 1) * 2.2))}px`,
+                    left: `${planet.left}%`,
+                    top: `${planet.top}%`,
+                  } as React.CSSProperties}
+                ><span className="body-label">{planet.letter?.toUpperCase() ?? index + 1}</span></button>
+              ))}
+            </div>
+            <div className="legend">
+              <span><i className="legend-line measured" /> Measured orbit</span>
+              <span><i className="legend-line derived" /> Derived when needed</span>
+            </div>
+            <div className="view-controls">
+              <button type="button" aria-label="Reset view" onClick={() => setZoom(1)}>↺</button>
+              <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.35, value + .1))}>＋</button>
+              <button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(.7, value - .1))}>−</button>
+            </div>
+          </>
+        ) : <div className="space-loader"><span /></div>}
       </section>
     </main>
   );
