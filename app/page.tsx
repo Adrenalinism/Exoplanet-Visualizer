@@ -136,6 +136,21 @@ function orbitLayout(system: System) {
     [sectors[index], sectors[swapIndex]] = [sectors[swapIndex], sectors[index]];
   }
 
+  const luminositySolar = system.star.luminosityLogSolar === null
+    ? null
+    : 10 ** system.star.luminosityLogSolar;
+  const habitableInnerAu = luminositySolar === null ? null : Math.sqrt(luminositySolar / 1.1);
+  const habitableOuterAu = luminositySolar === null ? null : Math.sqrt(luminositySolar / 0.53);
+  const zoneFitsScale = min !== null
+    && max !== null
+    && min < max
+    && habitableInnerAu !== null
+    && habitableOuterAu !== null
+    && habitableInnerAu >= min
+    && habitableOuterAu <= max;
+  const habitableInnerSize = zoneFitsScale ? mapAxis(habitableInnerAu, 0) : null;
+  const habitableOuterSize = zoneFitsScale ? mapAxis(habitableOuterAu, 0) : null;
+
   return {
     planets: system.planets.map((planet, index) => {
       const orbitSize = mapAxis(planet.semiMajorAxisAu, index);
@@ -149,6 +164,12 @@ function orbitLayout(system: System) {
       };
     }),
     mapAxis,
+    habitableZone: habitableInnerSize !== null && habitableOuterSize !== null
+      ? {
+          outerSize: habitableOuterSize,
+          innerRatio: (habitableInnerSize / habitableOuterSize) * 100,
+        }
+      : null,
   };
 }
 
@@ -324,6 +345,16 @@ export default function Home() {
             </div>
             <div className="view-badge">NASA SNAPSHOT</div>
             <div className="orbit-stage" style={{ "--view-zoom": zoom } as React.CSSProperties}>
+              {layout.habitableZone && (
+                <div
+                  className="habitable-zone"
+                  aria-label="Approximate habitable zone"
+                  style={{
+                    "--zone-outer": `${layout.habitableZone.outerSize}%`,
+                    "--zone-inner-ratio": `${layout.habitableZone.innerRatio}%`,
+                  } as React.CSSProperties}
+                />
+              )}
               {layout.planets.map((planet) => (
                 <div className="orbit dynamic-orbit" key={`orbit-${planet.name}`} style={{ "--orbit-size": `${planet.orbitSize}%` } as React.CSSProperties} />
               ))}
@@ -351,6 +382,7 @@ export default function Home() {
               ))}
             </div>
             <div className="legend">
+              {layout.habitableZone && <span><i className="legend-line habitable" /> Approx. habitable zone</span>}
               <span><i className="legend-line measured" /> Measured orbit</span>
               <span><i className="legend-line derived" /> Derived when needed</span>
             </div>
