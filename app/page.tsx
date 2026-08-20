@@ -68,9 +68,28 @@ type SearchIndex = { entries: SearchEntry[] };
 const planetPalette = ["#bd7559", "#d2a27d", "#7e9d93", "#6f9da0", "#9c927b", "#ae8c73", "#718391", "#a98b9d"];
 
 function hash(value: string) {
-  let result = 0;
-  for (let index = 0; index < value.length; index += 1) result = ((result << 5) - result + value.charCodeAt(index)) | 0;
-  return Math.abs(result);
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
+  }
+  result += result << 13;
+  result ^= result >>> 7;
+  result += result << 3;
+  result ^= result >>> 17;
+  result += result << 5;
+  return result >>> 0;
+}
+
+function seededRandom(seed: number) {
+  let state = seed;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function planetColor(name: string) {
@@ -110,10 +129,18 @@ function orbitLayout(system: System) {
     return system.planets.length === 1 ? 55 : 22 + (index / Math.max(1, system.planets.length - 1)) * 72;
   };
 
+  const random = seededRandom(hash(system.name));
+  const sectors = system.planets.map((_, index) => index);
+  for (let index = sectors.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [sectors[index], sectors[swapIndex]] = [sectors[swapIndex], sectors[index]];
+  }
+
   return {
     planets: system.planets.map((planet, index) => {
       const orbitSize = mapAxis(planet.semiMajorAxisAu, index);
-      const angle = ((hash(planet.name) % 360) * Math.PI) / 180;
+      const phase = sectors.length === 1 ? random() : (sectors[index] + 0.1 + random() * 0.8) / sectors.length;
+      const angle = phase * Math.PI * 2;
       return {
         ...planet,
         orbitSize,
@@ -245,9 +272,7 @@ export default function Home() {
             </div>
           )}
         </div>
-        <div className="data-status">
-          <span /> {catalogue ? `${catalogue.metadata.planetCount.toLocaleString()} confirmed planets` : "Loading catalogue"}
-        </div>
+        <div className="data-status">{catalogue ? `${catalogue.metadata.planetCount.toLocaleString()} confirmed planets` : "Loading catalogue"}</div>
       </header>
 
       <aside className="information-panel">
@@ -297,7 +322,7 @@ export default function Home() {
               <h2>{system.name}</h2>
               <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
             </div>
-            <div className="view-badge"><span /> NASA SNAPSHOT</div>
+            <div className="view-badge">NASA SNAPSHOT</div>
             <div className="orbit-stage" style={{ "--view-zoom": zoom } as React.CSSProperties}>
               {layout.planets.map((planet) => (
                 <div className="orbit dynamic-orbit" key={`orbit-${planet.name}`} style={{ "--orbit-size": `${planet.orbitSize}%` } as React.CSSProperties} />
