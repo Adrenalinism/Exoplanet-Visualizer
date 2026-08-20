@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type NullableNumber = number | null;
 
@@ -67,6 +67,8 @@ type SearchIndex = { entries: SearchEntry[] };
 type PanelMode = "details" | "catalogue";
 type CataloguePreset = "all" | "nearby" | "multi" | "habitable";
 type CatalogueSort = "distance" | "planets" | "recent" | "name";
+type ScaleMode = "linear" | "log";
+type ViewState = { zoom: number; panX: number; panY: number };
 
 const planetPalette = ["#bd7559", "#d2a27d", "#7e9d93", "#6f9da0", "#9c927b", "#ae8c73", "#718391", "#a98b9d"];
 
@@ -138,13 +140,14 @@ function habitablePlanetCount(system: System) {
   ).length;
 }
 
-function orbitLayout(system: System) {
+function orbitLayout(system: System, scaleMode: ScaleMode) {
   const known = system.planets.map((planet) => planet.semiMajorAxisAu).filter((value): value is number => value !== null && value > 0);
   const min = known.length ? Math.min(...known) : null;
   const max = known.length ? Math.max(...known) : null;
 
   const mapAxis = (axis: NullableNumber, index: number) => {
     if (axis !== null && axis > 0 && min !== null && max !== null) {
+      if (scaleMode === "linear") return (axis / max) * 94;
       if (min === max) return 55;
       return 22 + ((Math.log(axis) - Math.log(min)) / (Math.log(max) - Math.log(min))) * 72;
     }
@@ -163,11 +166,10 @@ function orbitLayout(system: System) {
   const habitableOuterAu = habitable?.outerAu ?? null;
   const zoneFitsScale = min !== null
     && max !== null
-    && min < max
     && habitableInnerAu !== null
     && habitableOuterAu !== null
-    && habitableInnerAu >= min
-    && habitableOuterAu <= max;
+    && habitableOuterAu <= max
+    && (scaleMode === "linear" || (min < max && habitableInnerAu >= min));
   const habitableInnerSize = zoneFitsScale ? mapAxis(habitableInnerAu, 0) : null;
   const habitableOuterSize = zoneFitsScale ? mapAxis(habitableOuterAu, 0) : null;
 
@@ -223,11 +225,14 @@ export default function Home() {
   const [selectedPlanetIndex, setSelectedPlanetIndex] = useState<number | null>(3);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>("linear");
+  const [view, setView] = useState<ViewState>({ zoom: 1, panX: 0, panY: 0 });
+  const [isDragging, setIsDragging] = useState(false);
   const [panelMode, setPanelMode] = useState<PanelMode>("details");
   const [cataloguePreset, setCataloguePreset] = useState<CataloguePreset>("nearby");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("distance");
   const [catalogueLimit, setCatalogueLimit] = useState(30);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (catalogue && systemIndex === null) {
@@ -237,7 +242,7 @@ export default function Home() {
   }, [catalogue, systemIndex]);
 
   const system = catalogue && systemIndex !== null ? catalogue.systems[systemIndex] : null;
-  const layout = useMemo(() => system ? orbitLayout(system) : null, [system]);
+  const layout = useMemo(() => system ? orbitLayout(system, scaleMode) : null, [system, scaleMode]);
   const selectedPlanet = system && selectedPlanetIndex !== null ? system.planets[selectedPlanetIndex] ?? null : null;
   const selectedColor = selectedPlanet ? planetColor(selectedPlanet.name) : starColor(system?.star.temperatureK ?? null);
 
@@ -280,7 +285,7 @@ export default function Home() {
   function chooseSearchResult(entry: SearchEntry) {
     setSystemIndex(entry.systemIndex);
     setSelectedPlanetIndex(entry.type === "planet" ? entry.planetIndex : null);
-    setZoom(1);
+    resetView();
     setQuery("");
     setSearchOpen(false);
     setPanelMode("details");
@@ -296,13 +301,70 @@ export default function Home() {
   function browseSystem(index: number) {
     setSystemIndex(index);
     setSelectedPlanetIndex(null);
-    setZoom(1);
+    resetView();
   }
 
   function surpriseMe() {
     if (!catalogue?.systems.length) return;
     browseSystem(Math.floor(Math.random() * catalogue.systems.length));
     setPanelMode("details");
+  }
+
+  function resetView() {
+    setView({ zoom: 1, panX: 0, panY: 0 });
+  }
+
+  function changeScale(nextScale: ScaleMode) {
+    setScaleMode(nextScale);
+    resetView();
+  }
+
+  function zoomAt(factor: number, clientX?: number, clientY?: number, bounds?: DOMRect) {
+    setView((current) => {
+      const nextZoom = Math.max(0.7, Math.min(50, current.zoom * factor));
+      if (!bounds || clientX === undefined || clientY === undefined || nextZoom === current.zoom) {
+        return { ...current, zoom: nextZoom };
+      }
+      const pointerX = clientX - bounds.left;
+      const pointerY = clientY - bounds.top;
+      const baseX = bounds.width * 0.53;
+      const baseY = bounds.height * 0.53;
+      const ratio = nextZoom / current.zoom;
+      return {
+        zoom: nextZoom,
+        panX: current.panX + (pointerX - baseX - current.panX) * (1 - ratio),
+        panY: current.panY + (pointerY - baseY - current.panY) * (1 - ratio),
+      };
+    });
+  }
+
+  function handleWheel(event: React.WheelEvent<HTMLElement>) {
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    zoomAt(factor, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    setIsDragging(true);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.x;
+    const deltaY = event.clientY - drag.y;
+    dragRef.current = { ...drag, x: event.clientX, y: event.clientY };
+    setView((current) => ({ ...current, panX: current.panX + deltaX, panY: current.panY + deltaY }));
+  }
+
+  function endPointer(event: React.PointerEvent<HTMLElement>) {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setIsDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
   const starFacts = system ? [
@@ -399,7 +461,7 @@ export default function Home() {
                       ? "Orbital radius was calculated from period and stellar mass. The ≈ symbol marks this derived value."
                       : selectedPlanet?.orbitSource === "display-only"
                         ? "NASA has insufficient orbital data, so this planet’s placement is illustrative only."
-                        : "Body sizes are exaggerated for visibility. Orbital distances use a logarithmic scale."}
+                        : `Body sizes are exaggerated for visibility. Orbital distances use a ${scaleMode === "linear" ? "linear" : "logarithmic"} scale. Scroll to zoom and drag to pan.`}
                   </p>
                 </div>
                 <a className="source-link" href={catalogue?.metadata.sourceUrl ?? "https://exoplanetarchive.ipac.caltech.edu/"} target="_blank" rel="noreferrer">View NASA source data <span>↗</span></a>
@@ -465,7 +527,15 @@ export default function Home() {
         )}
       </aside>
 
-      <section className="system-view" aria-label={system ? `${system.name} planetary system visualization` : "Planetary system visualization"}>
+      <section
+        className={`system-view ${isDragging ? "is-dragging" : ""}`}
+        aria-label={system ? `${system.name} planetary system visualization` : "Planetary system visualization"}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endPointer}
+        onPointerCancel={endPointer}
+      >
         {system && layout ? (
           <>
             <div className="system-meta">
@@ -474,19 +544,23 @@ export default function Home() {
               <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
             </div>
             <div className="view-badge">NASA SNAPSHOT</div>
-            <div className="orbit-stage" style={{ "--view-zoom": zoom } as React.CSSProperties}>
+            <div
+              className="orbit-pan-layer"
+              style={{ "--pan-x": `${view.panX}px`, "--pan-y": `${view.panY}px` } as React.CSSProperties}
+            >
+            <div className="orbit-stage">
               {layout.habitableZone && (
                 <div
                   className="habitable-zone"
                   aria-label="Approximate habitable zone"
                   style={{
-                    "--zone-outer": `${layout.habitableZone.outerSize}%`,
+                    "--zone-outer": `${layout.habitableZone.outerSize * view.zoom}%`,
                     "--zone-inner-ratio": `${layout.habitableZone.innerRatio}%`,
                   } as React.CSSProperties}
                 />
               )}
               {layout.planets.map((planet) => (
-                <div className="orbit dynamic-orbit" key={`orbit-${planet.name}`} style={{ "--orbit-size": `${planet.orbitSize}%` } as React.CSSProperties} />
+                <div className="orbit dynamic-orbit" key={`orbit-${planet.name}`} style={{ "--orbit-size": `${planet.orbitSize * view.zoom}%` } as React.CSSProperties} />
               ))}
               <button
                 className={`celestial-body body-star ${selectedPlanetIndex === null ? "is-selected" : ""}`}
@@ -505,11 +579,12 @@ export default function Home() {
                   style={{
                     "--body-color": planetColor(planet.name),
                     "--body-size": `${Math.max(9, Math.min(20, 8 + (planet.radiusEarth ?? 1) * 2.2))}px`,
-                    left: `${planet.left}%`,
-                    top: `${planet.top}%`,
+                    left: `${50 + (planet.left - 50) * view.zoom}%`,
+                    top: `${50 + (planet.top - 50) * view.zoom}%`,
                   } as React.CSSProperties}
                 ><span className="body-label">{planet.letter?.toUpperCase() ?? index + 1}</span></button>
               ))}
+            </div>
             </div>
             <div className="legend">
               {layout.habitableZone && <span><i className="legend-line habitable" /> Approx. habitable zone</span>}
@@ -517,9 +592,11 @@ export default function Home() {
               <span><i className="legend-line derived" /> Derived when needed</span>
             </div>
             <div className="view-controls">
-              <button type="button" aria-label="Reset view" onClick={() => setZoom(1)}>↺</button>
-              <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.35, value + .1))}>＋</button>
-              <button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(.7, value - .1))}>−</button>
+              <button type="button" className={`scale-control ${scaleMode === "linear" ? "active" : ""}`} aria-label="Use linear orbit scale" aria-pressed={scaleMode === "linear"} onClick={() => changeScale("linear")}>LIN</button>
+              <button type="button" className={`scale-control ${scaleMode === "log" ? "active" : ""}`} aria-label="Use logarithmic orbit scale" aria-pressed={scaleMode === "log"} onClick={() => changeScale("log")}>LOG</button>
+              <button type="button" aria-label="Reset view" onClick={resetView}>↺</button>
+              <button type="button" aria-label="Zoom in" onClick={() => zoomAt(1.25)}>＋</button>
+              <button type="button" aria-label="Zoom out" onClick={() => zoomAt(.8)}>−</button>
             </div>
           </>
         ) : <div className="space-loader"><span /></div>}
