@@ -232,6 +232,7 @@ export default function Home() {
   const [cataloguePreset, setCataloguePreset] = useState<CataloguePreset>("nearby");
   const [catalogueSort, setCatalogueSort] = useState<CatalogueSort>("distance");
   const [catalogueLimit, setCatalogueLimit] = useState(30);
+  const systemViewRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -240,6 +241,26 @@ export default function Home() {
       setSystemIndex(initial >= 0 ? initial : 0);
     }
   }, [catalogue, systemIndex]);
+
+  useEffect(() => {
+    const canvas = systemViewRef.current;
+    if (!canvas) return;
+
+    const handleCanvasWheel = (event: WheelEvent) => {
+      const bounds = canvas.getBoundingClientRect();
+      const isInsideCanvas = event.clientX >= bounds.left
+        && event.clientX <= bounds.right
+        && event.clientY >= bounds.top
+        && event.clientY <= bounds.bottom;
+      if (!isInsideCanvas) return;
+      event.preventDefault();
+      event.stopPropagation();
+      zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY, bounds);
+    };
+
+    canvas.addEventListener("wheel", handleCanvasWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleCanvasWheel);
+  }, []);
 
   const system = catalogue && systemIndex !== null ? catalogue.systems[systemIndex] : null;
   const layout = useMemo(() => system ? orbitLayout(system, scaleMode) : null, [system, scaleMode]);
@@ -338,19 +359,6 @@ export default function Home() {
     });
   }
 
-  function handleWheel(event: React.WheelEvent<HTMLElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const isInsideCanvas = event.clientX >= bounds.left
-      && event.clientX <= bounds.right
-      && event.clientY >= bounds.top
-      && event.clientY <= bounds.bottom;
-    if (!isInsideCanvas) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const factor = Math.exp(-event.deltaY * 0.0015);
-    zoomAt(factor, event.clientX, event.clientY, bounds);
-  }
-
   function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
     const isPanButton = event.pointerType === "mouse" ? event.button === 1 : event.button === 0;
     const isTouchingControl = event.pointerType !== "mouse" && (event.target as HTMLElement).closest("button");
@@ -440,7 +448,7 @@ export default function Home() {
         <div className="data-status">{catalogue ? `${catalogue.metadata.planetCount.toLocaleString()} confirmed planets` : "Loading catalogue"}</div>
       </header>
 
-      <aside className="information-panel">
+      <aside className="information-panel" onWheel={(event) => event.stopPropagation()}>
         {system ? (
           <>
             <div className="panel-tabs" role="tablist" aria-label="Information panel mode">
@@ -543,9 +551,9 @@ export default function Home() {
       </aside>
 
       <section
+        ref={systemViewRef}
         className={`system-view ${isDragging ? "is-dragging" : ""}`}
         aria-label={system ? `${system.name} planetary system visualization` : "Planetary system visualization"}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endPointer}
