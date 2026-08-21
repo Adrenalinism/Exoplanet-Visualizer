@@ -164,14 +164,21 @@ function orbitLayout(system: System, scaleMode: ScaleMode) {
   const habitable = habitableBounds(system);
   const habitableInnerAu = habitable?.innerAu ?? null;
   const habitableOuterAu = habitable?.outerAu ?? null;
-  const zoneFitsScale = min !== null
+  const scaleFloorAu = scaleMode === "linear" ? 0 : min;
+  const visibleHabitableInnerAu = habitableInnerAu !== null && scaleFloorAu !== null
+    ? Math.max(habitableInnerAu, scaleFloorAu)
+    : null;
+  const visibleHabitableOuterAu = habitableOuterAu !== null && max !== null
+    ? Math.min(habitableOuterAu, max)
+    : null;
+  const zoneOverlapsScale = min !== null
     && max !== null
-    && habitableInnerAu !== null
-    && habitableOuterAu !== null
-    && habitableOuterAu <= max
-    && (scaleMode === "linear" || (min < max && habitableInnerAu >= min));
-  const habitableInnerSize = zoneFitsScale ? mapAxis(habitableInnerAu, 0) : null;
-  const habitableOuterSize = zoneFitsScale ? mapAxis(habitableOuterAu, 0) : null;
+    && visibleHabitableInnerAu !== null
+    && visibleHabitableOuterAu !== null
+    && visibleHabitableInnerAu < visibleHabitableOuterAu
+    && (scaleMode === "linear" || min < max);
+  const habitableInnerSize = zoneOverlapsScale ? mapAxis(visibleHabitableInnerAu, 0) : null;
+  const habitableOuterSize = zoneOverlapsScale ? mapAxis(visibleHabitableOuterAu, 0) : null;
 
   return {
     planets: system.planets.map((planet, index) => {
@@ -568,7 +575,7 @@ export default function Home() {
               <h2>{system.name}</h2>
               <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
             </div>
-            <div className="view-badge"><span>NASA SNAPSHOT</span><small>April 2026</small></div>
+            <div className="view-badge"><span>NASA SNAPSHOT</span><small>August 2026</small></div>
             <div
               className="orbit-pan-layer"
               style={{ "--pan-x": `${view.panX}px`, "--pan-y": `${view.panY}px` } as React.CSSProperties}
