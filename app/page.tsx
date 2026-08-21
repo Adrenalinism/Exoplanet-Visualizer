@@ -568,7 +568,7 @@ export default function Home() {
               <h2>{system.name}</h2>
               <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
             </div>
-            <div className="view-badge">NASA SNAPSHOT</div>
+            <div className="view-badge"><span>NASA SNAPSHOT</span><small>April 2026</small></div>
             <div
               className="orbit-pan-layer"
               style={{ "--pan-x": `${view.panX}px`, "--pan-y": `${view.panY}px` } as React.CSSProperties}

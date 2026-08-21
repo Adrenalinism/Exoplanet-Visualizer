@@ -95,7 +95,8 @@ button { color: inherit; }
 .system-meta span { color: #5e645f; text-transform: uppercase; letter-spacing: .14em; font-size: 8px; }
 .system-meta h2 { font: 400 22px Georgia, serif; margin: 5px 0; }
 .system-meta p { color: #606560; font-size: 9px; margin: 0; }
-.view-badge { position: absolute; z-index: 5; right: 28px; top: 30px; color: #647068; letter-spacing: .12em; font-size: 8px; }
+.view-badge { position: absolute; z-index: 5; right: 28px; top: 30px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; color: #647068; letter-spacing: .12em; font-size: 8px; }
+.view-badge small { color: #4f5852; font-size: 7px; letter-spacing: .08em; }
 .orbit-pan-layer { position: absolute; inset: 0; transform: translate(var(--pan-x), var(--pan-y)); will-change: transform; }
 .orbit-stage { position: absolute; left: 53%; top: 53%; width: min(69vw, 960px); aspect-ratio: 1.65; transform: translate(-50%, -50%); }
 .orbit, .habitable-zone { position: absolute; left: 50%; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); }
