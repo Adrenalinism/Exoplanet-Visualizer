@@ -14,6 +14,12 @@ async function render() {
   );
 }
 
+async function builtWorker() {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${Math.random()}`);
+  return (await import(workerUrl.href)).default;
+}
+
 test("server-renders the Orbis application shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
@@ -35,17 +41,41 @@ test("generated NASA data is complete and internally consistent", async () => {
   const catalogue = JSON.parse(catalogueText);
   const search = JSON.parse(searchText);
 
-  assert.equal(catalogue.metadata.planetCount, 6336);
-  assert.equal(catalogue.metadata.systemCount, 4749);
-  assert.equal(catalogue.systems.length, 4749);
+  assert.ok(catalogue.metadata.planetCount >= 6336);
+  assert.ok(catalogue.metadata.systemCount >= 4749);
+  assert.equal(catalogue.systems.length, catalogue.metadata.systemCount);
   assert.equal(
     catalogue.systems.reduce((count, system) => count + system.planets.length, 0),
-    6336,
+    catalogue.metadata.planetCount,
   );
-  assert.equal(search.entries.length, 6336 + 4749);
+  assert.equal(search.entries.length, catalogue.metadata.planetCount + catalogue.metadata.systemCount);
+  assert.ok(!Number.isNaN(Date.parse(catalogue.metadata.retrievedUtc ?? catalogue.metadata.sourceModifiedUtc)));
 
   const trappist = catalogue.systems.find((system) => system.name === "TRAPPIST-1");
   assert.ok(trappist);
   assert.equal(trappist.planets.length, 7);
   assert.equal(trappist.planets.find((planet) => planet.letter === "e")?.orbitSource, "measured");
+});
+
+test("hosted data routes prefer the durable NASA cache", async () => {
+  const worker = await builtWorker();
+  const cachedBody = JSON.stringify({ metadata: { retrievedUtc: "2026-08-22T00:00:00.000Z" }, systems: [] });
+  const response = await worker.fetch(
+    new Request("http://localhost/data/catalogue.json"),
+    {
+      ASSETS: { fetch: async () => new Response("static fallback") },
+      CATALOGUE_CACHE: {
+        get: async () => ({
+          body: cachedBody,
+          customMetadata: { retrievedUtc: "2026-08-22T00:00:00.000Z" },
+          httpEtag: '"cached"',
+        }),
+      },
+    },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), cachedBody);
+  assert.equal(response.headers.get("cache-control"), "no-cache, must-revalidate");
 });

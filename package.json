@@ -11,6 +11,7 @@
     "build:pages": "vite build --config vite.pages.config.ts",
     "start": "vinext start",
     "data:build": "node scripts/build-catalogue.mjs",
+    "data:refresh": "node scripts/fetch-catalogue.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

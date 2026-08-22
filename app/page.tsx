@@ -49,6 +49,7 @@ type Catalogue = {
   metadata: {
     planetCount: number;
     systemCount: number;
+    retrievedUtc?: string;
     sourceModifiedUtc: string;
     sourceUrl: string;
   };
@@ -112,6 +113,18 @@ function starColor(temperature: NullableNumber) {
 function format(value: NullableNumber, digits = 2) {
   if (value === null) return "Unknown";
   return value.toLocaleString(undefined, { maximumFractionDigits: digits });
+}
+
+function formatSnapshotDate(value?: string) {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-NZ", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function planetType(planet: Planet) {
@@ -575,7 +588,7 @@ export default function Home() {
               <h2>{system.name}</h2>
               <p>{system.distancePc === null ? "Distance unknown" : `${format(system.distancePc * 3.26156)} light-years away`} · {system.planetCount} confirmed planet{system.planetCount === 1 ? "" : "s"}</p>
             </div>
-            <div className="view-badge"><span>NASA SNAPSHOT</span><small>August 2026</small></div>
+            <div className="view-badge"><span>NASA SNAPSHOT</span><small>{formatSnapshotDate(catalogue?.metadata.retrievedUtc ?? catalogue?.metadata.sourceModifiedUtc)}</small></div>
             <div
               className="orbit-pan-layer"
               style={{ "--pan-x": `${view.panX}px`, "--pan-y": `${view.panY}px` } as React.CSSProperties}
