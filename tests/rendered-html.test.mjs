@@ -61,7 +61,7 @@ test("hosted data routes prefer the durable NASA cache", async () => {
   const worker = await builtWorker();
   const cachedBody = JSON.stringify({ metadata: { retrievedUtc: "2026-08-22T00:00:00.000Z" }, systems: [] });
   const response = await worker.fetch(
-    new Request("http://localhost/data/catalogue.json"),
+    new Request("http://localhost/api/catalogue.json"),
     {
       ASSETS: { fetch: async () => new Response("static fallback") },
       CATALOGUE_CACHE: {

@@ -93,12 +93,21 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname.endsWith(`/data/${CATALOGUE_KEY}`) || url.pathname.endsWith(`/data/${SEARCH_KEY}`)) {
+    if (url.pathname === `/api/${CATALOGUE_KEY}` || url.pathname === `/api/${SEARCH_KEY}`) {
       const cached = await cachedCatalogueResponse(url.pathname, env, ctx);
       if (cached) return cached;
-      if (url.pathname.endsWith(`/data/${CATALOGUE_KEY}`) && env.CATALOGUE_CACHE) {
+      if (url.pathname === `/api/${CATALOGUE_KEY}` && env.CATALOGUE_CACHE) {
         ctx.waitUntil(refreshCatalogue(env).catch((error) => console.error("Initial NASA catalogue refresh failed", error)));
       }
+      const key = url.pathname.endsWith(`/${SEARCH_KEY}`) ? SEARCH_KEY : CATALOGUE_KEY;
+      const assetUrl = new URL(`/data/${key}`, request.url);
+      const fallback = await env.ASSETS.fetch(new Request(assetUrl, request));
+      if (fallback.ok) {
+        const headers = new Headers(fallback.headers);
+        headers.set("cache-control", "no-cache, must-revalidate");
+        return new Response(fallback.body, { status: fallback.status, headers });
+      }
+      return fallback;
     }
 
     if (url.pathname === "/_vinext/image") {
